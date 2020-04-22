@@ -27,8 +27,12 @@ struct wl_callback *frame_callback;
 
 static const unsigned int regular_height = 32;
 static bool run_display = true;
-uint32_t regular_color = 0x808080CC;
-uint32_t extended_color = 0x303030CC;
+static const uint32_t regular_color = 0x808080CC;
+static const uint32_t extended_color = 0x303030CC;
+static const uint32_t button_border_color = 0x4C7899FF;
+static const uint32_t button_background_color = 0x285577FF;
+static const uint32_t button_side = 100;
+static const uint32_t button_margin = 15;
 
 struct bar_output {
 	struct wl_output *output;
@@ -94,6 +98,42 @@ static struct wl_callback_listener output_frame_listener = {
 static void draw_extended(cairo_t *cairo, struct bar_output *output) {
     cairo_set_source_u32(cairo, extended_color);
 	cairo_paint(cairo);
+
+    cairo_set_source_u32(cairo, button_background_color);
+	cairo_rectangle(
+        cairo,
+        output->width / 2 - button_side / 2 - button_side - button_margin,
+        regular_height + button_margin,
+        button_side,
+        button_side
+    );
+	cairo_fill_preserve(cairo);
+    cairo_set_source_u32(cairo, button_border_color);
+    cairo_stroke(cairo);
+
+    cairo_set_source_u32(cairo, button_background_color);
+	cairo_rectangle(
+        cairo,
+        output->width / 2 - button_side / 2,
+        regular_height + button_margin,
+        button_side,
+        button_side
+    );
+	cairo_fill_preserve(cairo);
+    cairo_set_source_u32(cairo, button_border_color);
+    cairo_stroke(cairo);
+
+    cairo_set_source_u32(cairo, button_background_color);
+	cairo_rectangle(
+        cairo,
+        output->width / 2 - button_side / 2 + button_side + button_margin,
+        regular_height + button_margin,
+        button_side,
+        button_side
+    );
+	cairo_fill_preserve(cairo);
+    cairo_set_source_u32(cairo, button_border_color);
+    cairo_stroke(cairo);
 }
 
 static void draw_regular(cairo_t *cairo, struct bar_output *output) {
