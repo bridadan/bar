@@ -67,13 +67,14 @@ if cc.get_id() == 'clang'
 	add_project_arguments('-Wno-missing-braces', language: 'c')
 endif
 
+# TODO add versions
 wlroots = dependency('wlroots')
 wayland_protos = dependency('wayland-protocols', version: '>=1,17')
 wayland_client = dependency('wayland-client')
 wayland_cursor = dependency('wayland-cursor')
-wayland_egl = dependency('wayland-egl')
-egl = dependency('egl')
-glesv2 = dependency('glesv2')
+pango = dependency('pango')
+pangocairo = dependency('pangocairo')
+cairo = dependency('cairo')
 
 protocol_files = []
 
@@ -84,6 +85,12 @@ executable(
     'bar',
     [
       'main.c',
+      'button.h',
+      'button.c',
+      'pool-buffer.h',
+      'pool-buffer.c',
+      'cairo.h',
+      'cairo.c',
       get_variable('wlr_layer_shell_unstable_v1_c'),
       get_variable('wlr_layer_shell_unstable_v1_client_h'),
       get_variable('xdg_shell_c'),
@@ -93,8 +100,8 @@ executable(
       wayland_client,
       wayland_cursor,
       wlroots,
-      wayland_egl,
-      egl,
-      glesv2
+      pango,
+      pangocairo,
+      cairo,
     ]
 )

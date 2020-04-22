@@ -1,7 +1,6 @@
 #define _POSIX_C_SOURCE 200112L
 #include <linux/input-event-codes.h>
 #include <assert.h>
-#include <GLES2/gl2.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,11 +9,13 @@
 #include <unistd.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
-#include <wayland-egl.h>
-#include <wlr/render/egl.h>
 #include <wlr/util/log.h>
+#include <cairo/cairo.h>
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
+#include "button.h"
+#include "cairo.h"
+#include "pool-buffer.h"
 
 static struct wl_display *display;
 static struct wl_compositor *compositor;
@@ -22,22 +23,21 @@ static struct wl_shm *shm;
 static struct xdg_wm_base *xdg_wm_base;
 static struct zwlr_layer_shell_v1 *layer_shell;
 
-struct wlr_egl egl;
 struct wl_callback *frame_callback;
 
-static const uint32_t regular_height = 32;
-static const double alpha = 0.9;
+static const unsigned int regular_height = 32;
 static bool run_display = true;
-float regular_color[3] = { 0.5, 0.5, 0.5 };
-float extended_color[3] = { 0.2, 0.2, 0.2 };
+uint32_t regular_color = 0x808080CC;
+uint32_t extended_color = 0x303030CC;
 
 struct bar_output {
-	struct wl_egl_window *egl_window;
-	struct wlr_egl_surface *egl_surface;
 	struct wl_output *output;
 	struct wl_surface *surface;
 	struct wl_list link;
 	struct zwlr_layer_surface_v1 *layer_surface;
+	struct pool_buffer buffers[2];
+	struct pool_buffer *current_buffer;
+    bool frame_scheduled;
 
 	uint32_t width, height;
 	uint32_t max_width, max_height;
@@ -87,35 +87,80 @@ static void surface_frame_callback(
 	draw((struct bar_output*) data);
 }
 
-static struct wl_callback_listener frame_listener = {
+static struct wl_callback_listener output_frame_listener = {
 	.done = surface_frame_callback
 };
 
-static void draw_extended(struct bar_output *output) {
-    glClearColor(extended_color[0], extended_color[1], extended_color[2], alpha);
-	glClear(GL_COLOR_BUFFER_BIT);
+static void draw_extended(cairo_t *cairo, struct bar_output *output) {
+    cairo_set_source_u32(cairo, extended_color);
+	cairo_paint(cairo);
 }
 
-static void draw_regular(struct bar_output *output) {
-    glClearColor(regular_color[0], regular_color[1], regular_color[2], alpha);
-	glClear(GL_COLOR_BUFFER_BIT);
+static void draw_regular(cairo_t *cairo, struct bar_output *output) {
+    cairo_set_source_u32(cairo, regular_color);
+	cairo_paint(cairo);
 }
 
 static void draw(struct bar_output *output) {
-	eglMakeCurrent(egl.display, output->egl_surface, output->egl_surface, egl.context);
+	cairo_surface_t *recorder = cairo_recording_surface_create(
+			CAIRO_CONTENT_COLOR_ALPHA, NULL);
+	cairo_t *cairo = cairo_create(recorder);
+	cairo_set_antialias(cairo, CAIRO_ANTIALIAS_BEST);
+    /*
+	cairo_font_options_t *fo = cairo_font_options_create();
+	cairo_font_options_set_hint_style(fo, CAIRO_HINT_STYLE_FULL);
+	cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_SUBPIXEL);
+	cairo_font_options_set_subpixel_order(fo, to_cairo_subpixel_order(output->subpixel));
+	cairo_set_font_options(cairo, fo);
+	cairo_font_options_destroy(fo);
+    */
+	cairo_save(cairo);
+	cairo_set_operator(cairo, CAIRO_OPERATOR_CLEAR);
+	cairo_paint(cairo);
+	cairo_restore(cairo);
 
-	glViewport(0, 0, output->width, output->height);
-
+    // do the render
+	cairo_set_operator(cairo, CAIRO_OPERATOR_SOURCE);
     if (output->extended) {
-        draw_extended(output);
+        draw_extended(cairo, output);
     } else {
-        draw_regular(output);
+        draw_regular(cairo, output);
     }
 
-	frame_callback = wl_surface_frame(output->surface);
-	wl_callback_add_listener(frame_callback, &frame_listener, output);
+    // Replay recording into shm and send it off
+    output->current_buffer = get_next_buffer(shm,
+            output->buffers,
+            output->width * output->scale,
+            output->height * output->scale);
+    if (!output->current_buffer) {
+        cairo_surface_destroy(recorder);
+        cairo_destroy(cairo);
+        wlr_log(WLR_DEBUG, "Null buffer");
+        return;
+    }
+    cairo_t *shm = output->current_buffer->cairo;
 
-	eglSwapBuffers(egl.display, output->egl_surface);
+    cairo_save(shm);
+    cairo_set_operator(shm, CAIRO_OPERATOR_CLEAR);
+    cairo_paint(shm);
+    cairo_restore(shm);
+
+    cairo_set_source_surface(shm, recorder, 0.0, 0.0);
+    cairo_paint(shm);
+
+    wl_surface_set_buffer_scale(output->surface, output->scale);
+    wl_surface_attach(output->surface,
+            output->current_buffer->buffer, 0, 0);
+    wl_surface_damage(output->surface, 0, 0,
+            output->width, output->height);
+
+    struct wl_callback *frame_callback = wl_surface_frame(output->surface);
+    wl_callback_add_listener(frame_callback, &output_frame_listener, output);
+    output->frame_scheduled = true;
+
+    wl_surface_commit(output->surface);
+	cairo_surface_destroy(recorder);
+	cairo_destroy(cairo);
 }
 
 static void layer_surface_configure(void *data,
@@ -125,10 +170,6 @@ static void layer_surface_configure(void *data,
 	output->width = w;
 	output->height = h;
 	wlr_log(WLR_DEBUG, "layer_surface_configure: %u, %u", output->width, output->height);
-	if (output->egl_window) {
-		wlr_log(WLR_DEBUG, "resizing egl");
-		wl_egl_window_resize(output->egl_window, output->width, output->height, 0, 0);
-	}
 
     output->extended = output->should_extend;
 	zwlr_layer_surface_v1_ack_configure(output->layer_surface, serial);
@@ -137,8 +178,6 @@ static void layer_surface_configure(void *data,
 static void layer_surface_closed(void *data,
 		struct zwlr_layer_surface_v1 *surface) {
 	struct bar_output *output = data;
-	wlr_egl_destroy_surface(&egl, output->egl_surface);
-	wl_egl_window_destroy(output->egl_window);
 	zwlr_layer_surface_v1_destroy(output->layer_surface);
 	wl_surface_destroy(output->surface);
 	run_display = false;
@@ -536,10 +575,7 @@ int main(int argc, char **argv) {
 	wlr_log(WLR_DEBUG, "Starting");
 
 
-	EGLint attribs[] = { EGL_ALPHA_SIZE, 8, EGL_NONE };
-	wlr_egl_init(&egl, EGL_PLATFORM_WAYLAND_EXT, display,
-			attribs, WL_SHM_FORMAT_ARGB8888);
-
+    assert(!init_button());
 
 	struct bar_output *output;
 	wl_list_for_each(output, &bar_outputs, link) {
@@ -577,10 +613,6 @@ int main(int argc, char **argv) {
 		wl_surface_commit(output->surface);
 		wl_display_roundtrip(display);
 
-		output->egl_window = wl_egl_window_create(output->surface, output->width, regular_height);
-		assert(output->egl_window);
-		output->egl_surface = wlr_egl_create_surface(&egl, output->egl_window);
-		assert(output->egl_surface);
 		wl_display_roundtrip(display);
 		draw(output);
 	}
