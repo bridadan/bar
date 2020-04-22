@@ -25,7 +25,7 @@ static struct zwlr_layer_shell_v1 *layer_shell;
 struct wlr_egl egl;
 struct wl_callback *frame_callback;
 
-static const uint32_t regular_height = 40;
+static const uint32_t regular_height = 32;
 static const double alpha = 0.9;
 static bool run_display = true;
 float regular_color[3] = { 0.5, 0.5, 0.5 };
