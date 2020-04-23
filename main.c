@@ -14,8 +14,8 @@
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 #include "button.h"
-#include "cairo.h"
 #include "pool-buffer.h"
+#include "bar.h"
 
 static struct wl_display *display;
 static struct wl_compositor *compositor;
@@ -28,57 +28,9 @@ struct wl_callback *frame_callback;
 static const unsigned int regular_height = 32;
 static bool run_display = true;
 static const uint32_t regular_color = 0x808080CC;
-static const uint32_t extended_color = 0x303030CC;
-static const uint32_t button_border_color = 0x4C7899FF;
-static const uint32_t button_background_color = 0x285577FF;
+static const uint32_t extended_color = 0x222222CC;
 static const uint32_t button_side = 100;
 static const uint32_t button_margin = 15;
-
-struct bar_output {
-	struct wl_output *output;
-	struct wl_surface *surface;
-	struct wl_list link;
-	struct zwlr_layer_surface_v1 *layer_surface;
-	struct pool_buffer buffers[2];
-	struct pool_buffer *current_buffer;
-    bool frame_scheduled;
-
-	uint32_t width, height;
-	uint32_t max_width, max_height;
-	int32_t scale;
-	bool should_extend, extended;
-};
-
-struct touch_slot {
-	int32_t id;
-	uint32_t time;
-	struct bar_output *output;
-	double start_x, start_y;
-	double x, y;
-};
-
-struct bar_touch {
-	struct wl_touch *touch;
-	struct touch_slot slots[16];
-};
-
-struct bar_pointer {
-	struct wl_pointer *pointer;
-	struct wl_cursor_theme *cursor_theme;
-	struct wl_cursor_image *cursor_image;
-	struct wl_surface *cursor_surface;
-	struct bar_output *current;
-	int x, y;
-	uint32_t serial;
-};
-
-struct bar_seat {
-	uint32_t wl_name;
-	struct wl_seat *wl_seat;
-	struct bar_pointer pointer;
-	struct bar_touch touch;
-	struct wl_list link; // bar_seat:link
-};
 
 static struct wl_list bar_outputs;
 static struct wl_list bar_seats;
@@ -99,41 +51,9 @@ static void draw_extended(cairo_t *cairo, struct bar_output *output) {
     cairo_set_source_u32(cairo, extended_color);
 	cairo_paint(cairo);
 
-    cairo_set_source_u32(cairo, button_background_color);
-	cairo_rectangle(
-        cairo,
-        (output->width / 2 - button_side / 2 - button_side - button_margin) * output->scale,
-        regular_height * output->scale,
-        button_side * output->scale,
-        button_side * output->scale
-    );
-	cairo_fill_preserve(cairo);
-    cairo_set_source_u32(cairo, button_border_color);
-    cairo_stroke(cairo);
-
-    cairo_set_source_u32(cairo, button_background_color);
-	cairo_rectangle(
-        cairo,
-        (output->width / 2 - button_side / 2) * output->scale,
-        regular_height * output->scale,
-        button_side * output->scale,
-        button_side * output->scale
-    );
-    cairo_fill_preserve(cairo);
-    cairo_set_source_u32(cairo, button_border_color);
-    cairo_stroke(cairo);
-
-    cairo_set_source_u32(cairo, button_background_color);
-	cairo_rectangle(
-        cairo,
-        (output->width / 2 - button_side / 2 + button_side + button_margin) * output->scale,
-        regular_height * output->scale,
-        button_side * output->scale,
-        button_side * output->scale
-    );
-    cairo_fill_preserve(cairo);
-    cairo_set_source_u32(cairo, button_border_color);
-    cairo_stroke(cairo);
+	button_draw(&(output->button_a), cairo, output);
+	button_draw(&(output->button_b), cairo, output);
+	button_draw(&(output->button_c), cairo, output);
 }
 
 static void draw_regular(cairo_t *cairo, struct bar_output *output) {
@@ -293,19 +213,66 @@ static void wl_pointer_motion(void *data, struct wl_pointer *wl_pointer,
 	struct bar_seat *seat = data;
 	seat->pointer.x = wl_fixed_to_int(surface_x);
 	seat->pointer.y = wl_fixed_to_int(surface_y);
+
+	struct bar_output *output = NULL;
+    // TODO mark the output as needing a new frame
+	wl_list_for_each(output, &bar_outputs, link) {
+        button_pointer_moved(&output->button_a, seat->pointer.x, seat->pointer.y);
+        button_pointer_moved(&output->button_b, seat->pointer.x, seat->pointer.y);
+        button_pointer_moved(&output->button_c, seat->pointer.x, seat->pointer.y);
+	}
 }
 
 static void process_hotspots(struct bar_output *output,
-		double x, double y, uint32_t button) {
+		double x, double y, uint32_t button, bool down) {
 	x *= output->scale;
 	y *= output->scale;
 
 	/* click */
-	wlr_log(WLR_DEBUG, "Click at (%f, %f) with button %u", x, y, button);
+	wlr_log(WLR_DEBUG, "%s at (%f, %f) with button %u", down ? "down" : "up", x, y, button);
 
-    output->should_extend = !output->should_extend;
-	zwlr_layer_surface_v1_set_size(output->layer_surface, output->width, output->should_extend ? output->max_height : regular_height);
-	wl_surface_commit(output->surface);
+    if (down) {
+        // TODO mark the output as needing a new frame
+        bool button_clicked = false;
+        if (output->button_a.hover && !output->button_a.active) {
+            button_clicked = true;
+            output->button_a.active = true;
+            output->button_a.render_required = true;
+        }
+
+        if (output->button_b.hover && !output->button_b.active) {
+            button_clicked = true;
+            output->button_b.active = true;
+            output->button_b.render_required = true;
+        }
+
+        if (output->button_c.hover && !output->button_c.active) {
+            button_clicked = true;
+            output->button_c.active = true;
+            output->button_c.render_required = true;
+        }
+
+        if (!button_clicked) {
+            output->should_extend = !output->should_extend;
+            zwlr_layer_surface_v1_set_size(output->layer_surface, output->width, output->should_extend ? output->max_height : regular_height);
+            wl_surface_commit(output->surface);
+        }
+    } else {
+        if (output->button_a.active) {
+            output->button_a.active = false;
+            output->button_a.render_required = true;
+        }
+
+        if (output->button_b.active) {
+            output->button_b.active = false;
+            output->button_b.render_required = true;
+        }
+
+        if (output->button_c.active) {
+            output->button_c.active = false;
+            output->button_c.render_required = true;
+        }
+    }
 }
 
 static void wl_pointer_button(void *data, struct wl_pointer *wl_pointer,
@@ -315,11 +282,7 @@ static void wl_pointer_button(void *data, struct wl_pointer *wl_pointer,
 	struct bar_output *output = pointer->current;
 	assert(output && "button with no active output");
 
-	if (state != WL_POINTER_BUTTON_STATE_PRESSED) {
-		return;
-	}
-
-	process_hotspots(output, pointer->x, pointer->y, button);
+	process_hotspots(output, pointer->x, pointer->y, button, state == WL_POINTER_BUTTON_STATE_PRESSED);
 }
 
 static void wl_pointer_axis(void *data, struct wl_pointer *wl_pointer,
@@ -399,6 +362,8 @@ static void wl_touch_down(void *data, struct wl_touch *wl_touch,
 	slot->x = slot->start_x = wl_fixed_to_double(x);
 	slot->y = slot->start_y = wl_fixed_to_double(y);
 	slot->time = time;
+
+    process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, false);
 }
 
 static void wl_touch_up(void *data, struct wl_touch *wl_touch,
@@ -410,7 +375,7 @@ static void wl_touch_up(void *data, struct wl_touch *wl_touch,
 	}
 	if (time - slot->time < 500) {
 		// Tap, treat it like a pointer click
-		process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT);
+		process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, true);
 	}
 	slot->output = NULL;
 
@@ -576,6 +541,7 @@ int main(int argc, char **argv) {
 	wlr_log_init(WLR_DEBUG, NULL);
 	wl_list_init(&bar_outputs);
 	wl_list_init(&bar_seats);
+
 	char *namespace = "wlroots";
 	int c;
 	while ((c = getopt(argc, argv, "h:")) != -1) {
@@ -614,9 +580,6 @@ int main(int argc, char **argv) {
 
 	wlr_log(WLR_DEBUG, "Starting");
 
-
-    assert(!init_button());
-
 	struct bar_output *output;
 	wl_list_for_each(output, &bar_outputs, link) {
 		output->surface = wl_compositor_create_surface(compositor);
@@ -653,7 +616,30 @@ int main(int argc, char **argv) {
 		wl_surface_commit(output->surface);
 		wl_display_roundtrip(display);
 
-		wl_display_roundtrip(display);
+        button_init(
+            &(output->button_a),
+            output->width / 2 - button_side / 2 - button_side - button_margin,
+            regular_height,
+            button_side,
+            button_side
+        );
+
+        button_init(
+            &(output->button_b),
+            output->width / 2 - button_side / 2,
+            regular_height,
+            button_side,
+            button_side
+        );
+
+        button_init(
+            &(output->button_c),
+            output->width / 2 - button_side / 2 + button_side + button_margin,
+            regular_height,
+            button_side,
+            button_side
+        );
+
 		draw(output);
 	}
 
