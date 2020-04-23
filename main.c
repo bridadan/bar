@@ -35,13 +35,26 @@ static const uint32_t button_margin = 15;
 
 struct wl_list bar_outputs;
 struct wl_list bar_seats;
-static void draw(struct bar_output* output);
+
+void set_output_dirty(struct bar_output *output) {
+    if (output->frame_scheduled) {
+        output->dirty = true;
+    } else if (output->surface) {
+        draw(output);
+    }
+}
 
 static void surface_frame_callback(
 		void *data, struct wl_callback *cb, uint32_t time) {
+    struct bar_output *output = data;
 	wl_callback_destroy(cb);
 	frame_callback = NULL;
-	draw((struct bar_output*) data);
+    output->frame_scheduled = false;
+    if (output->dirty) {
+        draw(output);
+        output->dirty = false;
+    }
+
 }
 
 static struct wl_callback_listener output_frame_listener = {
@@ -62,7 +75,8 @@ static void draw_regular(cairo_t *cairo, struct bar_output *output) {
 	cairo_paint(cairo);
 }
 
-static void draw(struct bar_output *output) {
+void draw(struct bar_output *output) {
+    wlr_log(WLR_DEBUG, "Drawing");
 	cairo_surface_t *recorder = cairo_recording_surface_create(
 			CAIRO_CONTENT_COLOR_ALPHA, NULL);
 	cairo_t *cairo = cairo_create(recorder);
@@ -134,6 +148,7 @@ static void layer_surface_configure(void *data,
 
     output->extended = output->should_extend;
 	zwlr_layer_surface_v1_ack_configure(output->layer_surface, serial);
+    set_output_dirty(output);
 }
 
 static void layer_surface_closed(void *data,

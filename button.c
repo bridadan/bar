@@ -23,27 +23,39 @@ void button_init(
     self->height = height;
 
     self->render_required = true;
-    self->hover = false;
-    self->active = false;
+    self->state = BUTTON_IDLE;
 }
 
-bool button_pointer_moved(
+// pointer_active in this case means there's a mouse being moved.
+// Touch screens don't have to move first before existing at a location.
+// On "touch up" events, this should be set to false. On "pointer move"
+// and "touch down" events, this should be set to true.
+bool button_state_update(
     struct button *self,
     unsigned int pointer_x,
-    unsigned int pointer_y
+    unsigned int pointer_y,
+    enum pointer_event event,
+    bool pointer_active
 ) {
     // No need to scale this since its a common factor of both sides
-    if (pointer_x >= self->x &&
+    enum button_state prev_state = self->state;
+    if (
+        pointer_active &&
+        pointer_x >= self->x &&
         pointer_x <= self->x + self->width &&
         pointer_y >= self->y &&
         pointer_y <= self->y + self->height
     ) {
-        if (!self->hover) {
-            self->hover = true;
-            self->render_required = true;
+        if (event == POINTER_DOWN) {
+            self->state = BUTTON_ACTIVE;
+        } else {
+            self->state = BUTTON_HOVER;
         }
-    } else if (self->hover) {
-        self->hover = false;
+    } else {
+        self->state = BUTTON_IDLE;
+    }
+
+    if (prev_state != self->state) {
         self->render_required = true;
     }
 
@@ -51,9 +63,9 @@ bool button_pointer_moved(
 }
 
 void button_draw(struct button *self, cairo_t *cairo, struct bar_output *output) {
-    if (self->active) {
+    if (self->state == BUTTON_ACTIVE) {
         cairo_set_source_u32(cairo, button_background_active_color);
-    } else if (self->hover) {
+    } else if (self->state == BUTTON_HOVER) {
         cairo_set_source_u32(cairo, button_background_hover_color);
     } else {
         cairo_set_source_u32(cairo, button_background_color);
@@ -69,4 +81,6 @@ void button_draw(struct button *self, cairo_t *cairo, struct bar_output *output)
 	cairo_fill_preserve(cairo);
     cairo_set_source_u32(cairo, button_border_color);
     cairo_stroke(cairo);
+
+    self->render_required = false;
 }

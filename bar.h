@@ -15,7 +15,6 @@ struct bar_output {
 	struct zwlr_layer_surface_v1 *layer_surface;
 	struct pool_buffer buffers[2];
 	struct pool_buffer *current_buffer;
-    bool frame_scheduled;
 
 	uint32_t width, height;
 	uint32_t max_width, max_height;
@@ -24,6 +23,7 @@ struct bar_output {
     struct button button_a;
     struct button button_b;
     struct button button_c;
+    bool dirty, frame_scheduled;
 };
 
 struct touch_slot {
@@ -57,5 +57,7 @@ struct bar_seat {
 	struct wl_list link; // bar_seat:link
 };
 
+void set_output_dirty(struct bar_output *output);
+void draw(struct bar_output *output);
 
 #endif // _BAR_H_

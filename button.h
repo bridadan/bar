@@ -3,9 +3,18 @@
 
 #include <cairo/cairo.h>
 
+#include "input.h"
+
+enum button_state {
+    BUTTON_IDLE,
+    BUTTON_HOVER,
+    BUTTON_ACTIVE,
+};
+
 struct button {
     unsigned int x, y, width, height;
-    bool render_required, hover, active;
+    enum button_state state;
+    bool render_required;
 };
 
 void button_init(
@@ -16,10 +25,12 @@ void button_init(
     unsigned int height
 );
 
-bool button_pointer_moved(
+bool button_state_update(
     struct button *self,
     unsigned int pointer_x,
-    unsigned int pointer_y
+    unsigned int pointer_y,
+    enum pointer_event event,
+    bool pointer_active
 );
 
 struct bar_output;

@@ -17,64 +17,29 @@ extern struct wl_compositor *compositor;
 extern bool run_display;
 
 static void process_hotspots(struct bar_output *output,
-		double x, double y, uint32_t button, bool down, bool touch) {
+		double x, double y, uint32_t button, enum pointer_event event, bool touch) {
 	//double new_x = x * output->scale;
 	//double new_y = y * output->scale;
 
 	/* click */
-	wlr_log(WLR_DEBUG, "%s at (%f, %f) with button %u", down ? "down" : "up", x, y, button);
+	wlr_log(WLR_DEBUG, "%s at (%f, %f) with event %u", touch ? "Touch" : "Pointer", x, y, event);
+    bool handled = false;
 
-    if (down) {
-        button_pointer_moved(&output->button_a, x, y);
-        button_pointer_moved(&output->button_b, x, y);
-        button_pointer_moved(&output->button_c, x, y);
+    if (output->extended) {
+        bool active = event == POINTER_DOWN || !touch;
+        handled = handled || button_state_update(&output->button_a, x, y, event, active);
+        handled = handled || button_state_update(&output->button_b, x, y, event, active);
+        handled = handled || button_state_update(&output->button_c, x, y, event, active);
 
-        // TODO mark the output as needing a new frame
-        bool button_clicked = false;
-        if (output->button_a.hover && !output->button_a.active) {
-            button_clicked = true;
-            output->button_a.active = true;
-            output->button_a.render_required = true;
+        if (handled) {
+            set_output_dirty(output);
         }
+    }
 
-        if (output->button_b.hover && !output->button_b.active) {
-            button_clicked = true;
-            output->button_b.active = true;
-            output->button_b.render_required = true;
-        }
-
-        if (output->button_c.hover && !output->button_c.active) {
-            button_clicked = true;
-            output->button_c.active = true;
-            output->button_c.render_required = true;
-        }
-
-        if (!button_clicked) {
-            output->should_extend = !output->should_extend;
-            zwlr_layer_surface_v1_set_size(output->layer_surface, output->width, output->should_extend ? output->max_height : regular_height);
-            wl_surface_commit(output->surface);
-        }
-    } else {
-        if (output->button_a.active) {
-            output->button_a.active = false;
-            output->button_a.render_required = true;
-        }
-
-        if (output->button_b.active) {
-            output->button_b.active = false;
-            output->button_b.render_required = true;
-        }
-
-        if (output->button_c.active) {
-            output->button_c.active = false;
-            output->button_c.render_required = true;
-        }
-
-        if (touch) {
-            output->button_a.hover = false;
-            output->button_b.hover = false;
-            output->button_c.hover = false;
-        }
+    if (!handled && event == POINTER_UP) {
+        output->should_extend = !output->should_extend;
+        zwlr_layer_surface_v1_set_size(output->layer_surface, output->width, output->should_extend ? output->max_height : regular_height);
+        wl_surface_commit(output->surface);
     }
 }
 
@@ -144,13 +109,7 @@ static void wl_pointer_motion(void *data, struct wl_pointer *wl_pointer,
 	seat->pointer.x = wl_fixed_to_int(surface_x);
 	seat->pointer.y = wl_fixed_to_int(surface_y);
 
-	struct bar_output *output = NULL;
-    // TODO mark the output as needing a new frame
-	wl_list_for_each(output, &bar_outputs, link) {
-        button_pointer_moved(&output->button_a, seat->pointer.x, seat->pointer.y);
-        button_pointer_moved(&output->button_b, seat->pointer.x, seat->pointer.y);
-        button_pointer_moved(&output->button_c, seat->pointer.x, seat->pointer.y);
-	}
+	process_hotspots(seat->pointer.current, seat->pointer.x, seat->pointer.y, BTN_LEFT, POINTER_MOVE, false);
 }
 
 static void wl_pointer_button(void *data, struct wl_pointer *wl_pointer,
@@ -160,7 +119,14 @@ static void wl_pointer_button(void *data, struct wl_pointer *wl_pointer,
 	struct bar_output *output = pointer->current;
 	assert(output && "button with no active output");
 
-	process_hotspots(output, pointer->x, pointer->y, button, state == WL_POINTER_BUTTON_STATE_PRESSED, false);
+	process_hotspots(
+        output,
+        pointer->x,
+        pointer->y,
+        button,
+        state == WL_POINTER_BUTTON_STATE_PRESSED ? POINTER_DOWN : POINTER_UP,
+        false
+    );
 }
 
 static void wl_pointer_axis(void *data, struct wl_pointer *wl_pointer,
@@ -241,7 +207,7 @@ static void wl_touch_down(void *data, struct wl_touch *wl_touch,
 	slot->y = slot->start_y = wl_fixed_to_double(y);
 	slot->time = time;
 
-    process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, true, true);
+    process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, POINTER_DOWN, true);
 }
 
 static void wl_touch_up(void *data, struct wl_touch *wl_touch,
@@ -253,7 +219,7 @@ static void wl_touch_up(void *data, struct wl_touch *wl_touch,
 	}
 	if (time - slot->time < 500) {
 		// Tap, treat it like a pointer click
-		process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, false, true);
+		process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, POINTER_UP, true);
 	}
 	slot->output = NULL;
 
