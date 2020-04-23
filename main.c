@@ -102,10 +102,10 @@ static void draw_extended(cairo_t *cairo, struct bar_output *output) {
     cairo_set_source_u32(cairo, button_background_color);
 	cairo_rectangle(
         cairo,
-        output->width / 2 - button_side / 2 - button_side - button_margin,
-        regular_height + button_margin,
-        button_side,
-        button_side
+        (output->width / 2 - button_side / 2 - button_side - button_margin) * output->scale,
+        regular_height * output->scale,
+        button_side * output->scale,
+        button_side * output->scale
     );
 	cairo_fill_preserve(cairo);
     cairo_set_source_u32(cairo, button_border_color);
@@ -114,24 +114,24 @@ static void draw_extended(cairo_t *cairo, struct bar_output *output) {
     cairo_set_source_u32(cairo, button_background_color);
 	cairo_rectangle(
         cairo,
-        output->width / 2 - button_side / 2,
-        regular_height + button_margin,
-        button_side,
-        button_side
+        (output->width / 2 - button_side / 2) * output->scale,
+        regular_height * output->scale,
+        button_side * output->scale,
+        button_side * output->scale
     );
-	cairo_fill_preserve(cairo);
+    cairo_fill_preserve(cairo);
     cairo_set_source_u32(cairo, button_border_color);
     cairo_stroke(cairo);
 
     cairo_set_source_u32(cairo, button_background_color);
 	cairo_rectangle(
         cairo,
-        output->width / 2 - button_side / 2 + button_side + button_margin,
-        regular_height + button_margin,
-        button_side,
-        button_side
+        (output->width / 2 - button_side / 2 + button_side + button_margin) * output->scale,
+        regular_height * output->scale,
+        button_side * output->scale,
+        button_side * output->scale
     );
-	cairo_fill_preserve(cairo);
+    cairo_fill_preserve(cairo);
     cairo_set_source_u32(cairo, button_border_color);
     cairo_stroke(cairo);
 }
