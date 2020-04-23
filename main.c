@@ -224,14 +224,18 @@ static void wl_pointer_motion(void *data, struct wl_pointer *wl_pointer,
 }
 
 static void process_hotspots(struct bar_output *output,
-		double x, double y, uint32_t button, bool down) {
-	x *= output->scale;
-	y *= output->scale;
+		double x, double y, uint32_t button, bool down, bool touch) {
+	//double new_x = x * output->scale;
+	//double new_y = y * output->scale;
 
 	/* click */
 	wlr_log(WLR_DEBUG, "%s at (%f, %f) with button %u", down ? "down" : "up", x, y, button);
 
     if (down) {
+        button_pointer_moved(&output->button_a, x, y);
+        button_pointer_moved(&output->button_b, x, y);
+        button_pointer_moved(&output->button_c, x, y);
+
         // TODO mark the output as needing a new frame
         bool button_clicked = false;
         if (output->button_a.hover && !output->button_a.active) {
@@ -272,6 +276,12 @@ static void process_hotspots(struct bar_output *output,
             output->button_c.active = false;
             output->button_c.render_required = true;
         }
+
+        if (touch) {
+            output->button_a.hover = false;
+            output->button_b.hover = false;
+            output->button_c.hover = false;
+        }
     }
 }
 
@@ -282,7 +292,7 @@ static void wl_pointer_button(void *data, struct wl_pointer *wl_pointer,
 	struct bar_output *output = pointer->current;
 	assert(output && "button with no active output");
 
-	process_hotspots(output, pointer->x, pointer->y, button, state == WL_POINTER_BUTTON_STATE_PRESSED);
+	process_hotspots(output, pointer->x, pointer->y, button, state == WL_POINTER_BUTTON_STATE_PRESSED, false);
 }
 
 static void wl_pointer_axis(void *data, struct wl_pointer *wl_pointer,
@@ -363,7 +373,7 @@ static void wl_touch_down(void *data, struct wl_touch *wl_touch,
 	slot->y = slot->start_y = wl_fixed_to_double(y);
 	slot->time = time;
 
-    process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, false);
+    process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, true, true);
 }
 
 static void wl_touch_up(void *data, struct wl_touch *wl_touch,
@@ -375,7 +385,7 @@ static void wl_touch_up(void *data, struct wl_touch *wl_touch,
 	}
 	if (time - slot->time < 500) {
 		// Tap, treat it like a pointer click
-		process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, true);
+		process_hotspots(slot->output, slot->x, slot->y, BTN_LEFT, false, true);
 	}
 	slot->output = NULL;
 
