@@ -91,6 +91,8 @@ executable(
       'pool-buffer.c',
       'cairo.h',
       'cairo.c',
+      'input.h',
+      'input.c',
       get_variable('wlr_layer_shell_unstable_v1_c'),
       get_variable('wlr_layer_shell_unstable_v1_client_h'),
       get_variable('xdg_shell_c'),
